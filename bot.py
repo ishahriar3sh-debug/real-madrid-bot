@@ -2,6 +2,7 @@
 Real Madrid News Bot — Bot Handlers
 """
 import logging
+import time
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -14,6 +15,10 @@ from news_fetcher import get_new_news
 from summarizer import summarize_news_persian
 
 logger = logging.getLogger(__name__)
+
+# Debounce: prevent rapid-fire button presses
+_last_news_time = {}
+DEBOUNCE_SECONDS = 10  # Min seconds between news requests
 
 
 # ─── Command Handlers ──────────────────────────────────────────
@@ -39,8 +44,8 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def news_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /news command — fetch, summarize, and send."""
-    await update.message.reply_text("🔍 در حال دریافت و خلاصه‌سازی اخبار...")
+    """Handle /news command."""
+    await update.message.reply_text("🔍 در حال دریافت اخبار...")
 
     news = get_new_news(RSS_FEEDS, MAX_NEWS_PER_UPDATE)
     if news:
@@ -71,12 +76,20 @@ async def sources_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─── Callback Handlers (Inline Buttons) ────────────────────────
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle inline button presses."""
+    """Handle inline button presses with debounce."""
     query = update.callback_query
+    user_id = query.from_user.id
     await query.answer()
 
     if query.data == "get_news":
-        await query.edit_message_text("🔍 در حال دریافت و خلاصه‌سازی اخبار...")
+        # Debounce: ignore if pressed too recently
+        now = time.time()
+        if user_id in _last_news_time and (now - _last_news_time[user_id]) < DEBOUNCE_SECONDS:
+            await query.answer("⏳ لطفاً چند لحظه صبر کنید...", show_alert=True)
+            return
+        _last_news_time[user_id] = now
+
+        await query.edit_message_text("🔍 در حال دریافت اخبار...")
         news = get_new_news(RSS_FEEDS, MAX_NEWS_PER_UPDATE)
         if news:
             msg = summarize_news_persian(news)

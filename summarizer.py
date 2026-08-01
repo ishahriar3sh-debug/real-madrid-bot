@@ -12,31 +12,27 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = "gemini-2.0-flash"
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
-# Lazy-load translator
 _translator = None
 
 
 def _get_translator():
-    """Get or create the Google Translate -> Persian translator."""
     global _translator
     if _translator is None:
         try:
             from deep_translator import GoogleTranslator
             _translator = GoogleTranslator(source="en", target="fa")
         except ImportError:
-            _translator = False  # Mark as unavailable
+            _translator = False
     return _translator
 
 
 def _translate_text(text: str) -> str:
-    """Translate English text to Persian using Google Translate."""
     if not text:
         return ""
     translator = _get_translator()
     if translator is False:
-        return text  # Translation unavailable, return as-is
+        return text
     try:
-        # deep-translator has a 5000 char limit per call
         if len(text) > 4500:
             text = text[:4500]
         return translator.translate(text)
@@ -46,10 +42,6 @@ def _translate_text(text: str) -> str:
 
 
 def summarize_news_persian(news_items: list[dict]) -> str:
-    """
-    Create a beautiful Persian summary of Real Madrid news.
-    Uses Gemini AI if available, otherwise translates + templates.
-    """
     if not news_items:
         return ""
 
@@ -62,7 +54,6 @@ def summarize_news_persian(news_items: list[dict]) -> str:
 
 
 def _gemini_summarize(news_items: list[dict]) -> str:
-    """Call Gemini API for Persian summary."""
     news_text = "\n".join(
         f"- {item['title']} (Source: {item.get('source_name', 'Unknown')})"
         for item in news_items
@@ -114,10 +105,7 @@ def _gemini_summarize(news_items: list[dict]) -> str:
 
 
 def _translated_template_summary(news_items: list[dict]) -> str:
-    """
-    Template-based summary with full Persian translation.
-    Translates each title + description using Google Translate.
-    """
+    """Template-based summary with full Persian translation. No duplicate descriptions."""
     from datetime import datetime, timezone, timedelta
 
     now = datetime.now(timezone.utc)
@@ -146,20 +134,33 @@ def _translated_template_summary(news_items: list[dict]) -> str:
         "",
     ]
 
+    # Deduplicate: skip if title is too similar to previous
+    seen_titles = set()
+
     for i, item in enumerate(news_items[:5], 1):
         emoji = ["🔵", "🟢", "⚪", "🔴", "🟡"][i - 1]
         source = item.get("source_name", "")
 
-        # Translate title to Persian
+        # Translate title
         original_title = item["title"]
         persian_title = _translate_text(original_title)
 
+        # Dedup: normalize and check similarity
+        normalized = re.sub(r"[^a-zA-Z0-9]", "", original_title.lower())
+        if normalized in seen_titles:
+            continue
+        seen_titles.add(normalized)
+
         lines.append(f"{emoji} **{persian_title}**")
 
-        # Translate description
+        # Only add description if it's meaningfully different from title
         if item.get("description"):
-            desc = _translate_text(item["description"][:200])
-            lines.append(f"_{desc}_")
+            desc_lower = re.sub(r"[^a-zA-Z0-9]", "", item["description"].lower())
+            title_lower = re.sub(r"[^a-zA-Z0-9]", "", original_title.lower())
+            # Skip if description is just the title repeated or very similar
+            if desc_lower != title_lower and not desc_lower.startswith(title_lower[:40]):
+                desc = _translate_text(item["description"][:200])
+                lines.append(f"_{desc}_")
 
         if source:
             lines.append(f"📎 {source}")
