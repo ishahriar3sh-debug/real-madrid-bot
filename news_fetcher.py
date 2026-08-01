@@ -216,18 +216,34 @@ def fetch_all_news(feeds: list[dict], telegram_sources: list[dict] = None, filte
 
 
 def get_new_news(feeds: list[dict], telegram_sources: list[dict] = None, max_items: int = 15) -> list[dict]:
-    """Get news that hasn't been sent before."""
+    """Get news that hasn't been sent before. Prioritizes items with images."""
     cache = load_cache()
     all_news = fetch_all_news(feeds, telegram_sources)
 
+    # Separate items with and without images
+    with_images = [item for item in all_news if item.get("image_url")]
+    without_images = [item for item in all_news if not item.get("image_url")]
+
     new_items = []
-    for item in all_news:
+
+    # First, add items with images (prioritize visual content)
+    for item in with_images:
         h = news_hash(item["title"])
         if h not in cache:
             cache[h] = time.time()
             new_items.append(item)
             if len(new_items) >= max_items:
                 break
+
+    # Then fill remaining slots with items without images
+    if len(new_items) < max_items:
+        for item in without_images:
+            h = news_hash(item["title"])
+            if h not in cache:
+                cache[h] = time.time()
+                new_items.append(item)
+                if len(new_items) >= max_items:
+                    break
 
     save_cache(cache)
     return new_items
@@ -242,6 +258,9 @@ if __name__ == "__main__":
     
     if news:
         print(f"✅ {len(news)} خبر جدید پیدا شد:\n")
+        with_img = sum(1 for n in news if n.get("image_url"))
+        print(f"   📷 {with_img} خبر با تصویر")
+        print(f"   📝 {len(news) - with_img} خبر بدون تصویر\n")
         for i, item in enumerate(news[:10], 1):
             source = item.get("source_name", "")
             has_img = "📷" if item.get("image_url") else "  "
