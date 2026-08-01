@@ -34,7 +34,7 @@ def summarize_news_persian(news_items: list[dict]) -> str:
 
 def _gemini_summarize(news_text: str, news_items: list[dict]) -> str:
     """Call Gemini API for Persian summary."""
-    prompt = f"""تو یک خبرنگار فارسی‌زبان حرفه‌ای هستی که برای باشگاه رئال مادرید خبر تهیه می‌کنی.
+    prompt = f"""تو یک خبرنگار فارسی زبان حرفه ای هستی که برای باشگاه رئال مادرید خبر تهیه می کنی.
 
 این اخبار رئال مادرید رو بخون و یه خلاصه زیبا و یکپارچه به فارسی بنویس.
 
@@ -82,37 +82,159 @@ def _gemini_summarize(news_text: str, news_items: list[dict]) -> str:
         return _template_summary(news_items)
 
 
+# ─── Persian Translations ──────────────────────────────────────
+PERSIAN_TRANSLATIONS = {
+    # Players
+    "vinicius": "وینیسیوس",
+    "bellingham": "بلینگام",
+    "mbappe": "امباپه",
+    "mbappé": "امباپه",
+    "modric": "موریچ",
+    "kroos": "کروس",
+    "courtois": "کورتوا",
+    "alaba": "آلابا",
+    "carvajal": "کارواخال",
+    "mendy": "مندی",
+    "valverde": "والورده",
+    "rodrygo": "رودریگو",
+    "tchouameni": "چوامنی",
+    "camavinga": "کاماوینگا",
+    "jude": "جود",
+    "vinícius": "وینیسیوس",
+    "joselu": "خوسلو",
+    "luka": "لوکا",
+    "dani": "دانی",
+    "federico": "فردریکو",
+    "eduardo": "ادواردو",
+    "thibaut": "تیبوت",
+    "antonio": "آنتونیو",
+    "aurelien": "اورلین",
+    "jacob": "جیکوب",
+    "güler": "گولر",
+    "arda": "آردا",
+    # Clubs
+    "real madrid": "رئال مادرید",
+    "realmadrid": "رئال مادرید",
+    "los blancos": "لوس بلانکوس",
+    "madrid": "مادرید",
+    "barcelona": "بارسلونا",
+    "atletico": "اتلتیکو",
+    "champions league": "لیگ قهرمانان",
+    "la liga": "لالیگا",
+    "laliga": "لالیگا",
+    "copa del rey": "جام حذفی",
+    "europa league": "لیگ اروپا",
+    # Common football terms
+    "transfer": "انتقال",
+    "signing": "جذب بازیکن",
+    "goal": "گل",
+    "match": "بازی",
+    "victory": "پیروزی",
+    "defeat": "شکست",
+    "draw": "تساوی",
+    "coach": "مربی",
+    "manager": "مربی",
+    "stadium": "ورزشگاه",
+    "santiago bernabeu": "سانتیاگو برنابئو",
+    "bernabeu": "برنابئو",
+    "injury": "مصدومیت",
+    "contract": "قرارداد",
+    "renewal": "تمدید",
+    "extension": "تمدید",
+    "release clause": "بند آزادسازی",
+    "buyout": "بند آزادسازی",
+    "training": "تمرین",
+    "season": "فصل",
+    "league": "لیگ",
+    "cup": "جام",
+    "trophy": "جام",
+    "final": "فینال",
+    "semifinal": "نیمه نهایی",
+    "quarterfinal": "یک چهارم نهایی",
+    "score": "نتیجه",
+    "result": "نتیجه",
+    "starting": "ترکیب اصلی",
+    "lineup": "ترکیب",
+    "substitution": "تعویض",
+    "penalty": "پنالتی",
+    "red card": "کارت قرمز",
+    "yellow card": "کارت زرد",
+    "var": "VAR",
+    "world cup": "جام جهانی",
+    "preseason": "پیش فصل",
+    "pre-season": "پیش فصل",
+    "friendly": "دوستانه",
+    "stadium": "ورزشگاه",
+    "fan": "هوادار",
+    "fans": "هواداران",
+    "madridista": "مادریدیستا",
+}
+
+
+def _translate_to_persian(title: str) -> str:
+    """Translate common football terms in title to Persian."""
+    result = title
+    # Sort by length (longest first) to avoid partial replacements
+    sorted_terms = sorted(PERSIAN_TRANSLATIONS.items(), key=lambda x: len(x[0]), reverse=True)
+    for eng, fa in sorted_terms:
+        # Case-insensitive replacement
+        import re
+        pattern = re.compile(re.escape(eng), re.IGNORECASE)
+        result = pattern.sub(fa, result)
+    return result
+
+
 def _template_summary(news_items: list[dict]) -> str:
     """Fallback: template-based Persian summary (no AI needed)."""
     from datetime import datetime, timezone, timedelta
 
-    # Persian month names
+    now = datetime.now(timezone.utc)
+    tehran_offset = timedelta(hours=3, minutes=30)
+    tehran_time = now + tehran_offset
+
+    # Persian date
     jalali_months = [
         "ژانویه", "فوریه", "مارس", "آوریل", "مه", "ژوئن",
         "ژوئیه", "اوت", "سپتامبر", "اکتبر", "نوامبر", "دسامبر"
     ]
-    now = datetime.now(timezone.utc)
-    tehran_offset = timedelta(hours=3, minutes=30)
-    tehran_time = now + tehran_offset
+    english_months = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    ]
     date_str = tehran_time.strftime("%H:%M — %d %B %Y")
-    for i, m in enumerate(jalali_months):
-        date_str = date_str.replace(m, ["ژانویه","فوریه","مارس","آوریل","مه","ژوئن","ژوئیه","اوت","سپتامبر","اکتبر","نوامبر","دسامبر"][i])
+    for en, fa in zip(english_months, jalali_months):
+        date_str = date_str.replace(en, fa)
 
-    lines = ["⚽ **خبرنامه رئال مادرید**", ""]
+    # Persian day names
+    persian_weekdays = ["دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه", "یکشنبه"]
+    weekday = persian_weekdays[tehran_time.weekday()]
+
+    lines = [
+        "⚽ **خبرنامه رئال مادرید**",
+        f"📅 {weekday} — {date_str}",
+        "",
+    ]
 
     for i, item in enumerate(news_items[:5], 1):
         emoji = ["🔵", "🟢", "⚪", "🔴", "🟡"][i - 1] if i <= 5 else "⚽"
         source = item.get("source_name", "")
-        lines.append(f"{emoji} **{item['title']}**")
+
+        # Translate title to Persian
+        original_title = item["title"]
+        persian_title = _translate_to_persian(original_title)
+
+        lines.append(f"{emoji} **{persian_title}**")
+
         if item.get("description"):
-            lines.append(f"_{item['description'][:150]}_")
+            desc = _translate_to_persian(item["description"][:150])
+            lines.append(f"_{desc}_")
+
         lines.append("")
         lines.append("ـــــــــــــــــــــــــــــــ")
 
     # Sources
     sources = list(set(item.get("source_name", "") for item in news_items[:5] if item.get("source_name")))
     lines.append(f"📎 **منابع:** {' — '.join(sources)}")
-    lines.append(f"🕐 _{date_str}_")
 
     return "\n".join(lines)
 
