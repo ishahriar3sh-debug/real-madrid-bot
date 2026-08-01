@@ -27,7 +27,7 @@ RSS_FEEDS = [
 ]
 
 # News Settings
-MAX_NEWS_PER_UPDATE = 5          # Max news items per message
+MAX_NEWS_PER_UPDATE = 10         # Max news items per message
 NEWS_FETCH_INTERVAL_HOURS = 3    # How often to fetch news (hours)
 DEDUP_WINDOW_HOURS = 24          # Don't re-send news from last 24h
 

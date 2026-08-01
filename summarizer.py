@@ -1,6 +1,6 @@
 """
 Real Madrid News Bot — AI News Summarizer
-Uses Gemini API for AI summaries + deep-translator for Persian translation.
+Creates a single cohesive Persian news summary.
 """
 import json
 import os
@@ -42,6 +42,7 @@ def _translate_text(text: str) -> str:
 
 
 def summarize_news_persian(news_items: list[dict]) -> str:
+    """Create a single cohesive Persian summary of all Real Madrid news."""
     if not news_items:
         return ""
 
@@ -50,32 +51,32 @@ def summarize_news_persian(news_items: list[dict]) -> str:
         if result:
             return result
 
-    return _translated_template_summary(news_items)
+    return _cohesive_persian_summary(news_items)
 
 
 def _gemini_summarize(news_items: list[dict]) -> str:
     news_text = "\n".join(
-        f"- {item['title']} (Source: {item.get('source_name', 'Unknown')})"
+        f"- {item['title']} ({item.get('source_name', 'Unknown')})"
         for item in news_items
     )
 
-    prompt = f"""تو یک خبرنگار فارسی زبان حرفه ای هستی که برای باشگاه رئال مادرید خبر تهیه می کنی.
+    prompt = f"""تو یک خبرنگار حرفه ای فارسی زبان هستی که اخبار رئال مادرید رو پوشش میدی.
 
-این اخبار رئال مادرید رو بخون و یه خلاصه زیبا و یکپارچه به فارسی بنویس.
+این اخبار رو بخون و یه پیام خبری منسجم و یکپارچه به فارسی بنویس.
 
 قوانین:
-1. عنوان خبر رو با ایموجی و بولد بنویس
-2. زیر هر عنوان، ۲-۳ جمله خلاصه به فارسی بنویس
-3. اخبار مرتبط رو با هم ترکیب کن
-4. منابع رو در انتهای پیام ذکر کن
-5. حداکثر ۵ بخش خبری داشته باش
-6. بین بخش‌ها خط جداکننده بذار
-7. جذاب و حرفه‌ای بنویس
+1. یه پیام واحد و منسجم بنویس (نه لیست جداگانه)
+2. اخبار مرتبط رو با هم ترکیب کن
+3. عنوان اصلی با ایموجی ⚪ بذار
+4. زیرش یه پاراگراف خلاصه بنویس که همه اخبار رو پوشش بده
+5. منابع رو انتهای پیام بنویس
+6. حداکثر ۳-۴ پاراگراف باشه
+7. جذاب و خوانا بنویس
 
 اخبار:
 {news_text}
 
-حالا خلاصه فارسی رو بنویس:"""
+حالا یه پیام خبری منسجم فارسی بنویس:"""
 
     payload = json.dumps({
         "contents": [{"parts": [{"text": prompt}]}],
@@ -100,12 +101,15 @@ def _gemini_summarize(news_items: list[dict]) -> str:
                 text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
             return text
     except (URLError, TimeoutError, KeyError, IndexError) as e:
-        print(f"[WARN] Gemini API failed: {e}, falling back to translated template")
+        print(f"[WARN] Gemini API failed: {e}, falling back to cohesive template")
         return ""
 
 
-def _translated_template_summary(news_items: list[dict]) -> str:
-    """Template-based summary with full Persian translation. No duplicate descriptions."""
+def _cohesive_persian_summary(news_items: list[dict]) -> str:
+    """
+    Create a single cohesive Persian message from all news items.
+    Groups related news together into paragraphs.
+    """
     from datetime import datetime, timezone, timedelta
 
     now = datetime.now(timezone.utc)
@@ -121,59 +125,67 @@ def _translated_template_summary(news_items: list[dict]) -> str:
         "January", "February", "March", "April", "May", "June",
         "July", "August", "September", "October", "November", "December"
     ]
-    date_str = tehran_time.strftime("%H:%M — %d %B %Y")
+    date_str = tehran_time.strftime("%d %B %Y")
     for en, fa in zip(english_months, jalali_months):
         date_str = date_str.replace(en, fa)
 
     persian_weekdays = ["دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه", "یکشنبه"]
     weekday = persian_weekdays[tehran_time.weekday()]
 
+    # Translate all titles
+    translated_items = []
+    for item in news_items[:10]:  # Use up to 10 items for richer summary
+        title_fa = _translate_text(item["title"])
+        translated_items.append({
+            "title_en": item["title"],
+            "title_fa": title_fa,
+            "source": item.get("source_name", ""),
+        })
+
+    # Deduplicate
+    seen = set()
+    unique_items = []
+    for item in translated_items:
+        key = re.sub(r"[^a-zA-Z0-9]", "", item["title_en"].lower())
+        if key not in seen:
+            seen.add(key)
+            unique_items.append(item)
+
+    # Group into a cohesive message
     lines = [
-        "⚽ **خبرنامه رئال مادرید**",
+        f"⚪ **خبرنامه رئال مادرید**",
         f"📅 {weekday} — {date_str}",
         "",
     ]
 
-    # Deduplicate: skip if title is too similar to previous
-    seen_titles = set()
-
-    for i, item in enumerate(news_items[:5], 1):
-        emoji = ["🔵", "🟢", "⚪", "🔴", "🟡"][i - 1]
-        source = item.get("source_name", "")
-
-        # Translate title
-        original_title = item["title"]
-        persian_title = _translate_text(original_title)
-
-        # Dedup: normalize and check similarity
-        normalized = re.sub(r"[^a-zA-Z0-9]", "", original_title.lower())
-        if normalized in seen_titles:
-            continue
-        seen_titles.add(normalized)
-
-        lines.append(f"{emoji} **{persian_title}**")
-
-        # Only add description if it's meaningfully different from title
-        if item.get("description"):
-            desc_lower = re.sub(r"[^a-zA-Z0-9]", "", item["description"].lower())
-            title_lower = re.sub(r"[^a-zA-Z0-9]", "", original_title.lower())
-            # Skip if description is just the title repeated or very similar
-            if desc_lower != title_lower and not desc_lower.startswith(title_lower[:40]):
-                desc = _translate_text(item["description"][:200])
-                lines.append(f"_{desc}_")
-
-        if source:
-            lines.append(f"📎 {source}")
-
+    # Create 2-3 cohesive paragraphs from the news
+    if len(unique_items) >= 3:
+        # Paragraph 1: First 2-3 items
+        p1_titles = [item["title_fa"] for item in unique_items[:3]]
+        lines.append("🔹 " + " | ".join(p1_titles))
         lines.append("")
-        lines.append("ـــــــــــــــــــــــــــــــ")
 
-    # Sources
-    sources = list(set(
-        item.get("source_name", "") for item in news_items[:5]
-        if item.get("source_name")
-    ))
-    lines.append(f"📎 **منابع:** {' — '.join(sources)}")
+        # Paragraph 2: Next items
+        if len(unique_items) > 3:
+            p2_titles = [item["title_fa"] for item in unique_items[3:6]]
+            lines.append("🔸 " + " | ".join(p2_titles))
+            lines.append("")
+
+        # Paragraph3: Remaining
+        if len(unique_items) > 6:
+            p3_titles = [item["title_fa"] for item in unique_items[6:9]]
+            lines.append("🔹 " + " | ".join(p3_titles))
+            lines.append("")
+    else:
+        # Few items: just list them nicely
+        for item in unique_items:
+            lines.append(f"⚪ {item['title_fa']}")
+            lines.append("")
+
+    # Sources (deduplicated)
+    sources = list(set(item["source"] for item in unique_items if item["source"]))
+    if sources:
+        lines.append(f"📎 **منابع:** {' — '.join(sources[:3])}")
 
     return "\n".join(lines)
 
@@ -183,9 +195,9 @@ if __name__ == "__main__":
     from config import RSS_FEEDS
 
     print("🔍 در حال دریافت اخبار...")
-    news = get_new_news(RSS_FEEDS, 5)
+    news = get_new_news(RSS_FEEDS, 10)
     if news:
-        print("\n📝 در حال ساخت خلاصه فارسی...\n")
+        print(f"\n📝 {len(news)} خبر یافت شد. در حال ساخت خلاصه منسجم...\n")
         summary = summarize_news_persian(news)
         print(summary)
     else:
