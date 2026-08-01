@@ -1,6 +1,8 @@
 """
 Real Madrid News Bot — RSS News Fetcher
-Fetches and parses Real Madrid news from multiple RSS sources.
+Fetches and parses Real Madrid news from multiple sources:
+- RSS feeds (Google News, BBC Sport, Marca)
+- Telegram channels (@Realmadridfarsi)
 """
 import hashlib
 import json
@@ -74,9 +76,6 @@ def parse_feed(xml_text: str) -> list[dict]:
     except ET.ParseError:
         return items
 
-    # Handle both RSS 2.0 and Atom
-    ns = {"atom": "http://www.w3.org/2005/Atom"}
-    
     # RSS 2.0
     for item in root.findall(".//item"):
         title_el = item.find("title")
@@ -103,12 +102,50 @@ def parse_feed(xml_text: str) -> list[dict]:
     return items
 
 
-def fetch_all_news(feeds: list[dict], filter_keyword: str = "real madrid") -> list[dict]:
-    """Fetch news from all configured RSS feeds."""
+def fetch_telegram_channel(channel_url: str, timeout: int = 15) -> list[dict]:
+    """Fetch posts from a public Telegram channel via web preview."""
+    req = Request(channel_url, headers={"User-Agent": USER_AGENT})
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+    except (URLError, TimeoutError, OSError) as e:
+        print(f"[WARN] Failed to fetch Telegram channel {channel_url}: {e}")
+        return []
+
+    items = []
+    # Extract message text from Telegram web preview
+    # Pattern: class="tgme_widget_message_text" ... content ...
+    messages = re.findall(
+        r'class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>',
+        html,
+        re.DOTALL,
+    )
+
+    for msg_html in messages[:20]:  # Last 20 messages
+        text = clean_html(msg_html)
+        if len(text) < 20:  # Skip very short messages (stickers, etc.)
+            continue
+        # Use first 100 chars as "title" for consistency
+        title = text[:150].strip()
+        if title:
+            items.append({
+                "title": title,
+                "link": channel_url,
+                "description": text[:200],
+                "pub_date": "",
+                "source": "Telegram",
+            })
+
+    return items
+
+
+def fetch_all_news(feeds: list[dict], telegram_sources: list[dict] = None, filter_keyword: str = "real madrid") -> list[dict]:
+    """Fetch news from all configured RSS feeds and Telegram channels."""
     all_items = []
     seen_titles = set()
     keyword = filter_keyword.lower()
 
+    # Fetch from RSS feeds
     for feed in feeds:
         xml_text = fetch_feed(feed["url"])
         if not xml_text:
@@ -118,11 +155,13 @@ def fetch_all_news(feeds: list[dict], filter_keyword: str = "real madrid") -> li
         feed_filter = feed.get("filter", keyword)
 
         for item in items:
-            title_lower = item["title"].lower()
-            # Filter: title or description must contain the keyword
-            if feed_filter not in title_lower and feed_filter not in item.get("description", "").lower():
-                continue
-            # Dedup within this fetch
+            # Skip filter if empty (for curated feeds like Marca Real Madrid)
+            if feed_filter:
+                title_lower = item["title"].lower()
+                if feed_filter not in title_lower and feed_filter not in item.get("description", "").lower():
+                    continue
+
+            # Dedup
             title_key = news_hash(item["title"])
             if title_key in seen_titles:
                 continue
@@ -130,13 +169,25 @@ def fetch_all_news(feeds: list[dict], filter_keyword: str = "real madrid") -> li
             item["source_name"] = feed["name"]
             all_items.append(item)
 
+    # Fetch from Telegram channels
+    if telegram_sources:
+        for source in telegram_sources:
+            items = fetch_telegram_channel(source["url"])
+            for item in items:
+                title_key = news_hash(item["title"])
+                if title_key in seen_titles:
+                    continue
+                seen_titles.add(title_key)
+                item["source_name"] = source["name"]
+                all_items.append(item)
+
     return all_items
 
 
-def get_new_news(feeds: list[dict], max_items: int = 5) -> list[dict]:
+def get_new_news(feeds: list[dict], telegram_sources: list[dict] = None, max_items: int = 15) -> list[dict]:
     """Get news that hasn't been sent before."""
     cache = load_cache()
-    all_news = fetch_all_news(feeds)
+    all_news = fetch_all_news(feeds, telegram_sources)
 
     new_items = []
     for item in all_news:
@@ -151,42 +202,17 @@ def get_new_news(feeds: list[dict], max_items: int = 5) -> list[dict]:
     return new_items
 
 
-def format_news_message(items: list[dict], header: str = "") -> str:
-    """Format news items into a beautiful Telegram message."""
-    if not items:
-        return ""
-
-    lines = []
-    if header:
-        lines.append(header)
-        lines.append("")
-
-    for i, item in enumerate(items, 1):
-        source = item.get("source_name", "")
-        source_badge = f" [{source}]" if source else ""
-        
-        lines.append(f"**{i}.** {item['title']}")
-        if item.get("description"):
-            lines.append(f"   _{item['description'][:120]}..._")
-        if item.get("link"):
-            lines.append(f"   🔗 [ادامه خبر]({item['link']})")
-        lines.append(f"   {source_badge}")
-        lines.append("")
-
-    lines.append(f"🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
-    return "\n".join(lines)
-
-
 if __name__ == "__main__":
     """Test the news fetcher."""
-    from config import RSS_FEEDS, MAX_NEWS_PER_UPDATE
+    from config import RSS_FEEDS, TELEGRAM_SOURCES, MAX_NEWS_PER_UPDATE
 
-    print("🔍 Fetching Real Madrid news...\n")
-    news = get_new_news(RSS_FEEDS, MAX_NEWS_PER_UPDATE)
+    print("🔍 در حال دریافت اخبار...\n")
+    news = get_new_news(RSS_FEEDS, TELEGRAM_SOURCES, MAX_NEWS_PER_UPDATE)
     
     if news:
-        msg = format_news_message(news, "⚽ **آخرین اخبار رئال مادرید**")
-        print(msg)
-        print(f"\n✅ {len(news)} خبر جدید پیدا شد.")
+        print(f"✅ {len(news)} خبر جدید پیدا شد:\n")
+        for i, item in enumerate(news[:10], 1):
+            source = item.get("source_name", "")
+            print(f"{i}. [{source}] {item['title'][:80]}")
     else:
         print("📭 خبر جدیدی یافت نشد.")

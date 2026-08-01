@@ -4,7 +4,7 @@ Real Madrid News Bot — Configuration
 import os
 
 # Bot Settings
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8792366937:AAFQTvY79e5YwOhqdDgB9HZOb8bEEMVF1wM")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8792366937:***")
 ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID", "580003433")
 
 # RSS Feed Sources (filtered for Real Madrid)
@@ -24,10 +24,23 @@ RSS_FEEDS = [
         "url": "https://feeds.bbci.co.uk/sport/football/rss.xml",
         "filter": "real madrid",
     },
+    {
+        "name": "Marca Real Madrid",
+        "url": "https://www.marca.com/rss/futbol/real-madrid.xml",
+        "filter": "",  # Marca Real Madrid page — all items are relevant
+    },
+]
+
+# Telegram Channel Source
+TELEGRAM_SOURCES = [
+    {
+        "name": "@Realmadridfarsi",
+        "url": "https://t.me/s/Realmadridfarsi",
+    },
 ]
 
 # News Settings
-MAX_NEWS_PER_UPDATE = 10         # Max news items per message
+MAX_NEWS_PER_UPDATE = 15         # Max news items per message
 NEWS_FETCH_INTERVAL_HOURS = 3    # How often to fetch news (hours)
 DEDUP_WINDOW_HOURS = 24          # Don't re-send news from last 24h
 
@@ -61,6 +74,8 @@ SOURCES_MSG = """
 1️⃣ **Google News** — اخبار لحظه‌ای رئال مادرید
 2️⃣ **Google News Transfer** — نقل و انتقالات
 3️⃣ **BBC Sport** — اخبار فوتبال انگلیس و جهان
+4️⃣ **Marca** — منبع اسپانیایی رئال مادرید
+5️⃣ **@Realmadridfarsi** — کانال فارسی رئال مادرید
 
 🌐 همه منابع از ایران قابل دسترسی هستند.
 """

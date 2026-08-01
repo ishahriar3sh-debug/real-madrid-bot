@@ -10,7 +10,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     ContextTypes,
 )
-from config import BOT_TOKEN, ADMIN_CHAT_ID, RSS_FEEDS, MAX_NEWS_PER_UPDATE, WELCOME_MSG, STATUS_MSG, SOURCES_MSG
+from config import BOT_TOKEN, ADMIN_CHAT_ID, RSS_FEEDS, TELEGRAM_SOURCES, MAX_NEWS_PER_UPDATE, WELCOME_MSG, STATUS_MSG, SOURCES_MSG
 from news_fetcher import get_new_news
 from summarizer import summarize_news_persian
 
@@ -47,7 +47,7 @@ async def news_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /news command."""
     await update.message.reply_text("🔍 در حال دریافت اخبار...")
 
-    news = get_new_news(RSS_FEEDS, MAX_NEWS_PER_UPDATE)
+    news = get_new_news(RSS_FEEDS, TELEGRAM_SOURCES, MAX_NEWS_PER_UPDATE)
     if news:
         msg = summarize_news_persian(news)
         await update.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
@@ -90,7 +90,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _last_news_time[user_id] = now
 
         await query.edit_message_text("🔍 در حال دریافت اخبار...")
-        news = get_new_news(RSS_FEEDS, MAX_NEWS_PER_UPDATE)
+        news = get_new_news(RSS_FEEDS, TELEGRAM_SOURCES, MAX_NEWS_PER_UPDATE)
         if news:
             msg = summarize_news_persian(news)
             await query.edit_message_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
@@ -114,7 +114,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send_scheduled_news(context: ContextTypes.DEFAULT_TYPE):
     """Send summarized news to admin chat — called by JobQueue."""
     admin_id = ADMIN_CHAT_ID
-    news = get_new_news(RSS_FEEDS, MAX_NEWS_PER_UPDATE)
+    news = get_new_news(RSS_FEEDS, TELEGRAM_SOURCES, MAX_NEWS_PER_UPDATE)
 
     if news:
         msg = summarize_news_persian(news)
