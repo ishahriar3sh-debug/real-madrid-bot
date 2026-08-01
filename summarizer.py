@@ -1,6 +1,6 @@
 """
 Real Madrid News Bot — AI News Summarizer
-Creates cohesive Persian news summaries, split into multiple messages if needed.
+Creates cohesive Persian news summaries with auto language detection.
 """
 import json
 import os
@@ -12,32 +12,88 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = "gemini-2.0-flash"
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
-_translator = None
+# Lazy-load translators
+_translator_en = None
+_translator_es = None
+_translator_auto = None
 
 
-def _get_translator():
-    global _translator
-    if _translator is None:
-        try:
-            from deep_translator import GoogleTranslator
-            _translator = GoogleTranslator(source="en", target="fa")
-        except ImportError:
-            _translator = False
-    return _translator
+def _get_translator(source_lang: str = "auto"):
+    """Get or create the appropriate translator."""
+    global _translator_en, _translator_es, _translator_auto
+    
+    if source_lang == "en":
+        if _translator_en is None:
+            try:
+                from deep_translator import GoogleTranslator
+                _translator_en = GoogleTranslator(source="en", target="fa")
+            except ImportError:
+                _translator_en = False
+        return _translator_en
+    elif source_lang == "es":
+        if _translator_es is None:
+            try:
+                from deep_translator import GoogleTranslator
+                _translator_es = GoogleTranslator(source="es", target="fa")
+            except ImportError:
+                _translator_es = False
+        return _translator_es
+    else:  # auto
+        if _translator_auto is None:
+            try:
+                from deep_translator import GoogleTranslator
+                _translator_auto = GoogleTranslator(source="auto", target="fa")
+            except ImportError:
+                _translator_auto = False
+        return _translator_auto
+
+
+def _detect_language(text: str) -> str:
+    """Detect if text is English or Spanish."""
+    # Common Spanish characters and words
+    spanish_chars = set("áéíóúñ¿¡")
+    spanish_words = ["el", "la", "los", "las", "de", "del", "en", "que", "por", "con", "una", "uno", "es", "se", "al", "lo", "como", "más", "pero", "sus", "le", "ya", "o", "este", "sí", "porque", "esta", "entre", "cuando", "muy", "sin", "sobre", "también", "me", "hasta", "hay", "donde", "quien", "desde", "todo", "nos", "durante", "todos", "uno", "les", "ni", "contra", "otros", "ese", "eso", "ante", "ellos", "e", "esto", "mí", "antes", "algunos", "qué", "unos", "yo", "otro", "otras", "otra", "él", "tanto", "esa", "estos", "mucho", "quienes", "nada", "muchos", "cual", "poco", "ella", "estar", "estas", "algunas", "algo", "nosotros", "mi", "mis", "tú", "te", "ti", "tu", "tus", "ellas", "nosotras", "vosotros", "vosotras", "os", "mío", "mía", "míos", "mías", "tuyo", "tuya", "tuyos", "tuyas", "suyo", "suya", "suyos", "suyas", "nuestro", "nuestra", "nuestros", "nuestras", "vuestro", "vuestra", "vuestros", "vuestras", "esos", "esas", "estoy", "estás", "está", "estamos", "estáis", "están", "esté", "estés", "estemos", "estéis", "estén", "estaré", "estarás", "estará", "estaremos", "estaréis", "estarán", "estaría", "estarías", "estaríamos", "estaríais", "estarían", "estaba", "estabas", "estábamos", "estabais", "estaban", "estuve", "estuviste", "estuvo", "estuvimos", "estuvisteis", "estuvieron", "estuviera", "estuvieras", "estuviéramos", "estuvierais", "estuvieran", "estuviese", "estuvieses", "estuviésemos", "estuvieseis", "estuviesen", "estando", "estado", "estada", "estados", "estadas", "estad", "he", "has", "ha", "hemos", "habéis", "han", "haya", "hayas", "hayamos", "hayáis", "hayan", "habré", "habrás", "habrá", "habremos", "habréis", "habrán", "habría", "habrías", "habríamos", "habríais", "habrían", "había", "habías", "habíamos", "habíais", "habían", "hube", "hubiste", "hubo", "hubimos", "hubisteis", "hubieron", "hubiera", "hubieras", "hubiéramos", "hubierais", "hubieran", "hubiese", "hubieses", "hubiésemos", "hubieseis", "hubiesen", "habiendo", "habido", "habida", "habidos", "habidas", "soy", "eres", "es", "somos", "sois", "son", "sea", "seas", "seamos", "seáis", "sean", "seré", "serás", "será", "seremos", "seréis", "serán", "sería", "serías", "seríamos", "seríais", "serían", "era", "eras", "éramos", "erais", "eran", "fui", "fuiste", "fue", "fuimos", "fuisteis", "fueron", "fuera", "fueras", "fuéramos", "fuerais", "fueran", "fuese", "fueses", "fuésemos", "fueseis", "fuesen", "siendo", "tenido", "tenida", "tenidos", "tenidas", "tened", "tengo", "tienes", "tiene", "tenemos", "tenéis", "tienen", "tenga", "tengas", "tengamos", "tengáis", "tengan", "tendré", "tendrás", "tendrá", "tendremos", "tendréis", "tendrán", "tendría", "tendrías", "tendríamos", "tendríais", "tendrían", "tenía", "tenías", "teníamos", "teníais", "tenían", "tuve", "tuviste", "tuvo", "tuvimos", "tuvisteis", "tuvieron", "tuviera", "tuvieras", "tuviéramos", "tuvierais", "tuvieran", "tuviese", "tuvieses", "tuviésemos", "tuvieseis", "tuviesen", "teniendo", "tenido", "tenida", "tenidos", "tenidas", "puedo", "puedes", "puede", "podemos", "podéis", "pueden", "pueda", "puedas", "podamos", "podáis", "puedan", "podré", "podrás", "podrá", "podremos", "podréis", "podrán", "podría", "podrías", "podríamos", "podríais", "podrían", "podía", "podías", "podíamos", "podíais", "podían", "pude", "pudiste", "pudo", "pudimos", "pudisteis", "pudieron", "pudiera", "pudieras", "pudiéramos", "pudierais", "pudieran", "pudiese", "pudieses", "pudiésemos", "pudieseis", "pudiesen", "pudiendo", "podido"]
+    
+    text_lower = text.lower()
+    
+    # Check for Spanish-specific characters
+    if any(c in text_lower for c in spanish_chars):
+        return "es"
+    
+    # Check for Spanish words
+    words = set(text_lower.split())
+    spanish_matches = len(words.intersection(set(spanish_words)))
+    if spanish_matches >= 2:
+        return "es"
+    
+    return "en"
 
 
 def _translate_text(text: str) -> str:
+    """Translate text to Persian with auto language detection."""
     if not text:
         return ""
-    translator = _get_translator()
+    
+    # Detect language
+    lang = _detect_language(text)
+    translator = _get_translator(lang)
+    
     if translator is False:
         return text
+    
     try:
         if len(text) > 4500:
             text = text[:4500]
         return translator.translate(text)
     except Exception as e:
-        print(f"[WARN] Translation failed: {e}")
+        print(f"[WARN] Translation failed ({lang} -> fa): {e}")
+        # Try auto-detect as fallback
+        try:
+            auto_translator = _get_translator("auto")
+            if auto_translator and auto_translator is not False:
+                return auto_translator.translate(text)
+        except Exception:
+            pass
         return text
 
 
@@ -55,21 +111,15 @@ def summarize_news_persian(news_items: list[dict]) -> str:
 
 
 def summarize_news_multi_persian(news_items: list[dict], max_per_msg: int = 10) -> list[str]:
-    """
-    Create multiple cohesive Persian messages from news items.
-    Splits into chunks of max_per_msg items.
-    Returns a list of message strings.
-    """
+    """Create multiple cohesive Persian messages from news items."""
     if not news_items:
         return []
 
     messages = []
-    # Split news into chunks
     for i in range(0, len(news_items), max_per_msg):
         chunk = news_items[i:i + max_per_msg]
         msg = summarize_news_persian(chunk)
         if msg:
-            # Add part number if multiple messages
             if len(news_items) > max_per_msg:
                 part_num = (i // max_per_msg) + 1
                 total_parts = (len(news_items) + max_per_msg - 1) // max_per_msg
@@ -126,7 +176,7 @@ def _gemini_summarize(news_items: list[dict]) -> str:
                 text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
             return text
     except (URLError, TimeoutError, KeyError, IndexError) as e:
-        print(f"[WARN] Gemini API failed: {e}, falling back to cohesive template")
+        print(f"[WARN] Gemini API failed: {e}, falling back to template")
         return ""
 
 
@@ -154,7 +204,7 @@ def _cohesive_persian_summary(news_items: list[dict]) -> str:
     persian_weekdays = ["دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه", "یکشنبه"]
     weekday = persian_weekdays[tehran_time.weekday()]
 
-    # Translate all titles
+    # Translate all titles with auto language detection
     translated_items = []
     for item in news_items[:10]:
         title_fa = _translate_text(item["title"])
@@ -182,18 +232,15 @@ def _cohesive_persian_summary(news_items: list[dict]) -> str:
 
     # Group into paragraphs
     if len(unique_items) >= 3:
-        # Paragraph 1: First 3 items
         p1_titles = [item["title_fa"] for item in unique_items[:3]]
         lines.append("🔹 " + " | ".join(p1_titles))
         lines.append("")
 
-        # Paragraph 2: Next items
         if len(unique_items) > 3:
             p2_titles = [item["title_fa"] for item in unique_items[3:6]]
             lines.append("🔸 " + " | ".join(p2_titles))
             lines.append("")
 
-        # Paragraph 3: Remaining
         if len(unique_items) > 6:
             p3_titles = [item["title_fa"] for item in unique_items[6:9]]
             lines.append("🔹 " + " | ".join(p3_titles))
