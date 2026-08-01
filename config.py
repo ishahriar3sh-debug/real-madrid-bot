@@ -27,7 +27,7 @@ RSS_FEEDS = [
     {
         "name": "Marca Real Madrid",
         "url": "https://www.marca.com/rss/futbol/real-madrid.xml",
-        "filter": "",  # Marca Real Madrid page — all items are relevant
+        "filter": "",
     },
 ]
 
@@ -40,7 +40,8 @@ TELEGRAM_SOURCES = [
 ]
 
 # News Settings
-MAX_NEWS_PER_UPDATE = 15         # Max news items per message
+MAX_NEWS_PER_UPDATE = 30         # Max news items per update (may split into 3 msgs)
+MAX_MESSAGES_PER_SEND = 3        # Max messages per update
 NEWS_FETCH_INTERVAL_HOURS = 3    # How often to fetch news (hours)
 DEDUP_WINDOW_HOURS = 24          # Don't re-send news from last 24h
 

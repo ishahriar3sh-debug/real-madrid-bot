@@ -10,15 +10,19 @@ from telegram.ext import (
     CallbackQueryHandler,
     ContextTypes,
 )
-from config import BOT_TOKEN, ADMIN_CHAT_ID, RSS_FEEDS, TELEGRAM_SOURCES, MAX_NEWS_PER_UPDATE, WELCOME_MSG, STATUS_MSG, SOURCES_MSG
+from config import (
+    BOT_TOKEN, ADMIN_CHAT_ID, RSS_FEEDS, TELEGRAM_SOURCES,
+    MAX_NEWS_PER_UPDATE, MAX_MESSAGES_PER_SEND,
+    WELCOME_MSG, STATUS_MSG, SOURCES_MSG,
+)
 from news_fetcher import get_new_news
-from summarizer import summarize_news_persian
+from summarizer import summarize_news_multi_persian
 
 logger = logging.getLogger(__name__)
 
 # Debounce: prevent rapid-fire button presses
 _last_news_time = {}
-DEBOUNCE_SECONDS = 10  # Min seconds between news requests
+DEBOUNCE_SECONDS = 10
 
 
 # ─── Command Handlers ──────────────────────────────────────────
@@ -44,13 +48,14 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def news_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /news command."""
-    await update.message.reply_text("🔍 در حال دریافت اخبار...")
+    """Handle /news command — fetch, summarize, send (up to 3 msgs)."""
+    await update.message.reply_text("🔍 در حال دریافت اخبار از تمام منابع...")
 
     news = get_new_news(RSS_FEEDS, TELEGRAM_SOURCES, MAX_NEWS_PER_UPDATE)
     if news:
-        msg = summarize_news_persian(news)
-        await update.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
+        messages = summarize_news_multi_persian(news, max_per_msg=10)
+        for msg in messages[:MAX_MESSAGES_PER_SEND]:
+            await update.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
     else:
         await update.message.reply_text(
             "📭 خبر جدیدی یافت نشد. دوباره بعداً بررسی کن.",
@@ -82,18 +87,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     if query.data == "get_news":
-        # Debounce: ignore if pressed too recently
+        # Debounce
         now = time.time()
         if user_id in _last_news_time and (now - _last_news_time[user_id]) < DEBOUNCE_SECONDS:
             await query.answer("⏳ لطفاً چند لحظه صبر کنید...", show_alert=True)
             return
         _last_news_time[user_id] = now
 
-        await query.edit_message_text("🔍 در حال دریافت اخبار...")
+        await query.edit_message_text("🔍 در حال دریافت اخبار از تمام منابع...")
         news = get_new_news(RSS_FEEDS, TELEGRAM_SOURCES, MAX_NEWS_PER_UPDATE)
         if news:
-            msg = summarize_news_persian(news)
-            await query.edit_message_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
+            messages = summarize_news_multi_persian(news, max_per_msg=10)
+            # Edit first message
+            await query.edit_message_text(messages[0], parse_mode="Markdown", disable_web_page_preview=True)
+            # Send additional messages
+            for msg in messages[1:MAX_MESSAGES_PER_SEND]:
+                await query.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
         else:
             await query.edit_message_text("📭 خبر جدیدی یافت نشد.")
 
@@ -117,15 +126,16 @@ async def send_scheduled_news(context: ContextTypes.DEFAULT_TYPE):
     news = get_new_news(RSS_FEEDS, TELEGRAM_SOURCES, MAX_NEWS_PER_UPDATE)
 
     if news:
-        msg = summarize_news_persian(news)
+        messages = summarize_news_multi_persian(news, max_per_msg=10)
         try:
-            await context.bot.send_message(
-                chat_id=admin_id,
-                text=msg,
-                parse_mode="Markdown",
-                disable_web_page_preview=True,
-            )
-            logger.info(f"Sent {len(news)} summarized news items to admin")
+            for msg in messages[:MAX_MESSAGES_PER_SEND]:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=msg,
+                    parse_mode="Markdown",
+                    disable_web_page_preview=True,
+                )
+            logger.info(f"Sent {len(news)} news items in {len(messages[:MAX_MESSAGES_PER_SEND])} messages to admin")
         except Exception as e:
             logger.error(f"Failed to send news to admin: {e}")
     else:
@@ -150,8 +160,8 @@ def setup_bot() -> Application:
     # Scheduled job: every 3 hours
     app.job_queue.run_repeating(
         send_scheduled_news,
-        interval=3 * 3600,  # 3 hours in seconds
-        first=60,  # First run after 1 minute
+        interval=3 * 3600,
+        first=60,
         name="real_madrid_news",
     )
 

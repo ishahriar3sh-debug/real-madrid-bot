@@ -1,6 +1,6 @@
 """
 Real Madrid News Bot — AI News Summarizer
-Creates a single cohesive Persian news summary.
+Creates cohesive Persian news summaries, split into multiple messages if needed.
 """
 import json
 import os
@@ -52,6 +52,31 @@ def summarize_news_persian(news_items: list[dict]) -> str:
             return result
 
     return _cohesive_persian_summary(news_items)
+
+
+def summarize_news_multi_persian(news_items: list[dict], max_per_msg: int = 10) -> list[str]:
+    """
+    Create multiple cohesive Persian messages from news items.
+    Splits into chunks of max_per_msg items.
+    Returns a list of message strings.
+    """
+    if not news_items:
+        return []
+
+    messages = []
+    # Split news into chunks
+    for i in range(0, len(news_items), max_per_msg):
+        chunk = news_items[i:i + max_per_msg]
+        msg = summarize_news_persian(chunk)
+        if msg:
+            # Add part number if multiple messages
+            if len(news_items) > max_per_msg:
+                part_num = (i // max_per_msg) + 1
+                total_parts = (len(news_items) + max_per_msg - 1) // max_per_msg
+                msg = f"📨 **بخش {part_num} از {total_parts}**\n\n{msg}"
+            messages.append(msg)
+
+    return messages
 
 
 def _gemini_summarize(news_items: list[dict]) -> str:
@@ -106,10 +131,7 @@ def _gemini_summarize(news_items: list[dict]) -> str:
 
 
 def _cohesive_persian_summary(news_items: list[dict]) -> str:
-    """
-    Create a single cohesive Persian message from all news items.
-    Groups related news together into paragraphs.
-    """
+    """Create a single cohesive Persian message from news items."""
     from datetime import datetime, timezone, timedelta
 
     now = datetime.now(timezone.utc)
@@ -134,7 +156,7 @@ def _cohesive_persian_summary(news_items: list[dict]) -> str:
 
     # Translate all titles
     translated_items = []
-    for item in news_items[:10]:  # Use up to 10 items for richer summary
+    for item in news_items[:10]:
         title_fa = _translate_text(item["title"])
         translated_items.append({
             "title_en": item["title"],
@@ -151,16 +173,16 @@ def _cohesive_persian_summary(news_items: list[dict]) -> str:
             seen.add(key)
             unique_items.append(item)
 
-    # Group into a cohesive message
+    # Create cohesive message
     lines = [
         f"⚪ **خبرنامه رئال مادرید**",
         f"📅 {weekday} — {date_str}",
         "",
     ]
 
-    # Create 2-3 cohesive paragraphs from the news
+    # Group into paragraphs
     if len(unique_items) >= 3:
-        # Paragraph 1: First 2-3 items
+        # Paragraph 1: First 3 items
         p1_titles = [item["title_fa"] for item in unique_items[:3]]
         lines.append("🔹 " + " | ".join(p1_titles))
         lines.append("")
@@ -171,18 +193,17 @@ def _cohesive_persian_summary(news_items: list[dict]) -> str:
             lines.append("🔸 " + " | ".join(p2_titles))
             lines.append("")
 
-        # Paragraph3: Remaining
+        # Paragraph 3: Remaining
         if len(unique_items) > 6:
             p3_titles = [item["title_fa"] for item in unique_items[6:9]]
             lines.append("🔹 " + " | ".join(p3_titles))
             lines.append("")
     else:
-        # Few items: just list them nicely
         for item in unique_items:
             lines.append(f"⚪ {item['title_fa']}")
             lines.append("")
 
-    # Sources (deduplicated)
+    # Sources
     sources = list(set(item["source"] for item in unique_items if item["source"]))
     if sources:
         lines.append(f"📎 **منابع:** {' — '.join(sources[:3])}")
@@ -192,13 +213,16 @@ def _cohesive_persian_summary(news_items: list[dict]) -> str:
 
 if __name__ == "__main__":
     from news_fetcher import get_new_news
-    from config import RSS_FEEDS
+    from config import RSS_FEEDS, TELEGRAM_SOURCES
 
     print("🔍 در حال دریافت اخبار...")
-    news = get_new_news(RSS_FEEDS, 10)
+    news = get_new_news(RSS_FEEDS, TELEGRAM_SOURCES, 20)
     if news:
-        print(f"\n📝 {len(news)} خبر یافت شد. در حال ساخت خلاصه منسجم...\n")
-        summary = summarize_news_persian(news)
-        print(summary)
+        print(f"\n📝 {len(news)} خبر یافت شد. در حال ساخت خلاصه...\n")
+        messages = summarize_news_multi_persian(news, max_per_msg=10)
+        for i, msg in enumerate(messages, 1):
+            print(f"=== پیام {i} ===")
+            print(msg)
+            print()
     else:
         print("📭 خبری یافت نشد")
