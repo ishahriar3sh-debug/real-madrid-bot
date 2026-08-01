@@ -2,11 +2,11 @@
 Real Madrid News Bot — Entry Point
 Supports both long-polling (local) and webhook (cloud) modes.
 """
+import asyncio
 import logging
 import os
 import sys
 import threading
-import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Setup logging
@@ -26,7 +26,7 @@ class HealthHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"OK")
     
     def log_message(self, format, *args):
-        pass  # Suppress health check logs
+        pass
 
 
 def start_health_server():
@@ -47,12 +47,15 @@ def main():
         thread.start()
         logger.info("Render mode: health server started")
 
-    app = setup_bot()
     WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")
     RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL", "")
-
-    # If WEBHOOK_URL is set, use webhook mode (for cloud deployment)
     webhook = WEBHOOK_URL or RENDER_EXTERNAL_URL
+
+    # Create event loop explicitly (Python 3.14 compatibility)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    app = setup_bot()
 
     if webhook:
         logger.info(f"Starting bot in WEBHOOK mode: {webhook}")
