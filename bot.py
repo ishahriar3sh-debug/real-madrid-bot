@@ -1,5 +1,6 @@
 """
 Real Madrid News Bot — Bot Handlers
+Sends news with images when available.
 """
 import logging
 import time
@@ -48,14 +49,27 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def news_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /news command — fetch, summarize, send (up to 3 msgs)."""
+    """Handle /news command — fetch, summarize, send with images."""
     await update.message.reply_text("🔍 در حال دریافت اخبار از تمام منابع...")
 
     news = get_new_news(RSS_FEEDS, TELEGRAM_SOURCES, MAX_NEWS_PER_UPDATE)
     if news:
         messages = summarize_news_multi_persian(news, max_per_msg=10)
         for msg in messages[:MAX_MESSAGES_PER_SEND]:
-            await update.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
+            # Find first news item with image for this message chunk
+            img_url = _find_image_for_chunk(news, messages.index(msg), 10)
+            if img_url:
+                try:
+                    await update.message.reply_photo(
+                        photo=img_url,
+                        caption=msg[:1024],  # Telegram caption limit
+                        parse_mode="Markdown",
+                    )
+                except Exception:
+                    # Fallback to text if image fails
+                    await update.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
+            else:
+                await update.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
     else:
         await update.message.reply_text(
             "📭 خبر جدیدی یافت نشد. دوباره بعداً بررسی کن.",
@@ -98,11 +112,35 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         news = get_new_news(RSS_FEEDS, TELEGRAM_SOURCES, MAX_NEWS_PER_UPDATE)
         if news:
             messages = summarize_news_multi_persian(news, max_per_msg=10)
-            # Edit first message
-            await query.edit_message_text(messages[0], parse_mode="Markdown", disable_web_page_preview=True)
+            # Edit first message (with image if available)
+            img_url = _find_image_for_chunk(news, 0, 10)
+            if img_url:
+                try:
+                    await query.edit_message_text(messages[0], parse_mode="Markdown", disable_web_page_preview=True)
+                    # Send photo separately
+                    await query.message.reply_photo(
+                        photo=img_url,
+                        caption="🖼️ تصویر خبر اول",
+                    )
+                except Exception:
+                    await query.edit_message_text(messages[0], parse_mode="Markdown", disable_web_page_preview=True)
+            else:
+                await query.edit_message_text(messages[0], parse_mode="Markdown", disable_web_page_preview=True)
+
             # Send additional messages
-            for msg in messages[1:MAX_MESSAGES_PER_SEND]:
-                await query.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
+            for i, msg in enumerate(messages[1:MAX_MESSAGES_PER_SEND], 1):
+                img_url = _find_image_for_chunk(news, i * 10, 10)
+                if img_url:
+                    try:
+                        await query.message.reply_photo(
+                            photo=img_url,
+                            caption=msg[:1024],
+                            parse_mode="Markdown",
+                        )
+                    except Exception:
+                        await query.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
+                else:
+                    await query.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
         else:
             await query.edit_message_text("📭 خبر جدیدی یافت نشد.")
 
@@ -118,6 +156,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(SOURCES_MSG, parse_mode="Markdown")
 
 
+# ─── Helper Functions ──────────────────────────────────────────
+
+def _find_image_for_chunk(news_items: list[dict], start_idx: int, chunk_size: int) -> str:
+    """Find the first image URL in a chunk of news items."""
+    for item in news_items[start_idx:start_idx + chunk_size]:
+        img = item.get("image_url", "")
+        if img and img.startswith("http"):
+            return img
+    return ""
+
+
 # ─── Scheduled News Sender ─────────────────────────────────────
 
 async def send_scheduled_news(context: ContextTypes.DEFAULT_TYPE):
@@ -128,13 +177,30 @@ async def send_scheduled_news(context: ContextTypes.DEFAULT_TYPE):
     if news:
         messages = summarize_news_multi_persian(news, max_per_msg=10)
         try:
-            for msg in messages[:MAX_MESSAGES_PER_SEND]:
-                await context.bot.send_message(
-                    chat_id=admin_id,
-                    text=msg,
-                    parse_mode="Markdown",
-                    disable_web_page_preview=True,
-                )
+            for i, msg in enumerate(messages[:MAX_MESSAGES_PER_SEND]):
+                img_url = _find_image_for_chunk(news, i * 10, 10)
+                if img_url:
+                    try:
+                        await context.bot.send_photo(
+                            chat_id=admin_id,
+                            photo=img_url,
+                            caption=msg[:1024],
+                            parse_mode="Markdown",
+                        )
+                    except Exception:
+                        await context.bot.send_message(
+                            chat_id=admin_id,
+                            text=msg,
+                            parse_mode="Markdown",
+                            disable_web_page_preview=True,
+                        )
+                else:
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=msg,
+                        parse_mode="Markdown",
+                        disable_web_page_preview=True,
+                    )
             logger.info(f"Sent {len(news)} news items in {len(messages[:MAX_MESSAGES_PER_SEND])} messages to admin")
         except Exception as e:
             logger.error(f"Failed to send news to admin: {e}")

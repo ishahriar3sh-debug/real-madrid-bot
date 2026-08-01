@@ -1,7 +1,7 @@
 """
 Real Madrid News Bot — RSS News Fetcher
 Fetches and parses Real Madrid news from multiple sources:
-- RSS feeds (Google News, BBC Sport, Marca)
+- RSS feeds (Google News, BBC Sport, Marca) with images
 - Telegram channels (@Realmadridfarsi)
 """
 import hashlib
@@ -17,6 +17,9 @@ from urllib.error import URLError
 
 CACHE_FILE = os.path.join(os.path.dirname(__file__), "seen_news.json")
 USER_AGENT = "RealMadridNewsBot/1.0 (Python; +https://github.com)"
+
+# XML namespaces for media:content
+NS_MEDIA = {"media": "http://search.yahoo.com/mrss/"}
 
 
 def load_cache() -> dict:
@@ -66,7 +69,7 @@ def fetch_feed(feed_url: str, timeout: int = 15) -> str:
 
 
 def parse_feed(xml_text: str) -> list[dict]:
-    """Parse RSS XML into a list of news items."""
+    """Parse RSS XML into a list of news items with images."""
     items = []
     if not xml_text:
         return items
@@ -90,6 +93,16 @@ def parse_feed(xml_text: str) -> list[dict]:
         pub_date = pub_el.text if pub_el is not None else ""
         source = source_el.text if source_el is not None else source_el.get("url", "") if source_el is not None else ""
 
+        # Extract image from media:content or enclosure
+        image_url = ""
+        media_contents = item.findall("media:content", NS_MEDIA)
+        if media_contents:
+            image_url = media_contents[0].get("url", "")
+        else:
+            enclosure = item.find("enclosure")
+            if enclosure is not None and "image" in enclosure.get("type", ""):
+                image_url = enclosure.get("url", "")
+
         if title:
             items.append({
                 "title": title,
@@ -97,6 +110,7 @@ def parse_feed(xml_text: str) -> list[dict]:
                 "description": description[:200],
                 "pub_date": pub_date,
                 "source": source,
+                "image_url": image_url,
             })
 
     return items
@@ -113,19 +127,35 @@ def fetch_telegram_channel(channel_url: str, timeout: int = 15) -> list[dict]:
         return []
 
     items = []
-    # Extract message text from Telegram web preview
-    # Pattern: class="tgme_widget_message_text" ... content ...
-    messages = re.findall(
-        r'class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>',
+    # Extract message blocks with text and optional images
+    message_blocks = re.findall(
+        r'class="tgme_widget_message_wrap[^"]*"[^>]*>(.*?)</div>\s*</div>\s*</div>',
         html,
         re.DOTALL,
     )
 
-    for msg_html in messages[:20]:  # Last 20 messages
-        text = clean_html(msg_html)
-        if len(text) < 20:  # Skip very short messages (stickers, etc.)
+    for block in message_blocks[:20]:
+        # Extract text
+        text_match = re.search(
+            r'class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>',
+            block,
+            re.DOTALL,
+        )
+        if not text_match:
             continue
-        # Use first 100 chars as "title" for consistency
+        text = clean_html(text_match.group(1))
+        if len(text) < 20:
+            continue
+
+        # Extract image if present
+        image_url = ""
+        img_match = re.search(
+            r'class="tgme_widget_message_photo_wrap"[^>]*style="background-image:url\(&#039;([^&]+)',
+            block,
+        )
+        if img_match:
+            image_url = img_match.group(1)
+
         title = text[:150].strip()
         if title:
             items.append({
@@ -134,6 +164,7 @@ def fetch_telegram_channel(channel_url: str, timeout: int = 15) -> list[dict]:
                 "description": text[:200],
                 "pub_date": "",
                 "source": "Telegram",
+                "image_url": image_url,
             })
 
     return items
@@ -213,6 +244,7 @@ if __name__ == "__main__":
         print(f"✅ {len(news)} خبر جدید پیدا شد:\n")
         for i, item in enumerate(news[:10], 1):
             source = item.get("source_name", "")
-            print(f"{i}. [{source}] {item['title'][:80]}")
+            has_img = "📷" if item.get("image_url") else "  "
+            print(f"{i}. {has_img} [{source}] {item['title'][:80]}")
     else:
         print("📭 خبر جدیدی یافت نشد.")
