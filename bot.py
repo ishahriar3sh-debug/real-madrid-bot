@@ -4,7 +4,7 @@ Sends news with images when available.
 """
 import logging
 import time
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -212,7 +212,34 @@ async def send_scheduled_news(context: ContextTypes.DEFAULT_TYPE):
 
 def setup_bot() -> Application:
     """Setup and configure the bot."""
-    app = Application.builder().token(BOT_TOKEN).build()
+    # Set bot commands (English) to fix ???? display issue in Telegram menu
+    commands = [
+        BotCommand("start", "Start the bot"),
+        BotCommand("news", "Get latest Real Madrid news"),
+        BotCommand("status", "Check bot status"),
+        BotCommand("sources", "View news sources"),
+    ]
+
+    async def _post_init(application: Application) -> None:
+        """Set bot commands and descriptions after initialization."""
+        try:
+            await application.bot.set_my_commands(commands)
+            logger.info("Bot commands set successfully")
+        except Exception as e:
+            logger.warning(f"Failed to set bot commands: {e}")
+        # Set bot description and short description in English
+        try:
+            await application.bot.set_my_description(
+                "Real Madrid News Bot - Get the latest Real Madrid news in Persian"
+            )
+            await application.bot.set_my_short_description(
+                "Real Madrid news in Persian"
+            )
+            logger.info("Bot descriptions set successfully")
+        except Exception as e:
+            logger.warning(f"Failed to set bot descriptions: {e}")
+
+    app = Application.builder().token(BOT_TOKEN).post_init(_post_init).build()
 
     # Command handlers
     app.add_handler(CommandHandler("start", start_handler))
