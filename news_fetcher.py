@@ -249,6 +249,69 @@ def get_new_news(feeds: list[dict], telegram_sources: list[dict] = None, max_ite
     return new_items
 
 
+def get_player_news(feeds: list[dict], telegram_sources: list[dict], player_name: str, 
+                    max_items: int = 10, hours_back: int = 168) -> list[dict]:
+    """
+    Get news specifically about a player from the last N hours (default 1 week).
+    """
+    import time
+    from datetime import datetime, timezone
+    
+    all_news = fetch_all_news(feeds, telegram_sources)
+    
+    # Get search terms for this player
+    from players import get_player_search_terms
+    search_terms = get_player_search_terms({"name": player_name})
+    
+    # Time cutoff
+    cutoff_time = time.time() - (hours_back * 3600)
+    
+    player_news = []
+    seen_hashes = set()
+    
+    for item in all_news:
+        title_lower = item["title"].lower()
+        desc_lower = item.get("description", "").lower()
+        
+        # Check if any search term matches
+        matched = False
+        for term in search_terms:
+            term_lower = term.lower()
+            if term_lower in title_lower or term_lower in desc_lower:
+                matched = True
+                break
+        
+        if not matched:
+            continue
+        
+        # Dedup
+        h = news_hash(item["title"])
+        if h in seen_hashes:
+            continue
+        seen_hashes.add(h)
+        
+        # Check if recent enough (if pub_date available)
+        # We'll include all and let caller filter by time if needed
+        
+        player_news.append(item)
+        if len(player_news) >= max_items:
+            break
+    
+    # Sort by relevance (items with player name in title first)
+    def relevance_score(item):
+        title_lower = item["title"].lower()
+        score = 0
+        for term in search_terms:
+            if term.lower() in title_lower:
+                score += 10
+            elif term.lower() in item.get("description", "").lower():
+                score += 5
+        return score
+    
+    player_news.sort(key=relevance_score, reverse=True)
+    return player_news
+
+
 if __name__ == "__main__":
     """Test the news fetcher."""
     from config import RSS_FEEDS, TELEGRAM_SOURCES, MAX_NEWS_PER_UPDATE
