@@ -387,6 +387,7 @@ def setup_bot() -> Application:
         BotCommand("news", "Get latest Real Madrid news"),
         BotCommand("status", "Check bot status"),
         BotCommand("sources", "View news sources"),
+        BotCommand("players", "View Real Madrid squad"),
     ]
 
     async def _post_init(application: Application) -> None:
