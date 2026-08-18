@@ -46,31 +46,27 @@ NEWS_FETCH_INTERVAL_HOURS = 3    # How often to fetch news (hours)
 DEDUP_WINDOW_HOURS = 24          # Don't re-send news from last 24h
 
 # Bot Messages (Persian + English)
-WELCOME_MSG = """
-⚽ **Real Madrid News Bot**
+WELCOME_MSG = """⚽ **Real Madrid News Bot**
 
 به ربات اخبار رئال مادرید خوش اومدی!
 
 📋 دستورات:
-/start — شروع مجدد
+/start — شروع م{|*}جد
 /news — دریافت آخرین اخبار
+/players — لیست بازیکنان
 /status — وضعیت ربات
 /sources — منابع خبری
 
-🔔 اخبار هر ۳ ساعت خودکار ارسال میشه.
-"""
+🔔 اخبار هر ۳ ساعت خودکار ارسال میشه."""
 
-STATUS_MSG = """
-📊 **وضعیت ربات**
+STATUS_MSG = """📊 **وضعیت ربات**
 
 ⏰ آخرین بررسی: {last_check}
 📰 اخبار ارسال شده: {news_count}
 🔄 بازه بروزرسانی: هر {interval} ساعت
-✅ وضعیت: فعال
-"""
+✅ وضعیت: فعال"""
 
-SOURCES_MSG = """
-📰 **منابع خبری:**
+SOURCES_MSG = """📰 **منابع خبری:**
 
 1️⃣ **Google News** — اخبار لحظه‌ای رئال مادرید
 2️⃣ **Google News Transfer** — نقل و انتقالات
@@ -78,5 +74,4 @@ SOURCES_MSG = """
 4️⃣ **Marca** — منبع اسپانیایی رئال مادرید
 5️⃣ **@Realmadridfarsi** — کانال فارسی رئال مادرید
 
-🌐 همه منابع از ایران قابل دسترسی هستند.
-"""
+🌐 همه منابع از ایران قابل دسترسی هستند."""

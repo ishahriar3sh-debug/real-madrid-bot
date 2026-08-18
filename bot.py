@@ -37,6 +37,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("📰 دریافت اخبار", callback_data="get_news"),
             InlineKeyboardButton("📊 وضعیت", callback_data="get_status"),
         ],
+        [InlineKeyboardButton("👥 بازیکنان", callback_data="get_players")],
         [InlineKeyboardButton("ℹ️ منابع خبری", callback_data="get_sources")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -56,18 +57,16 @@ async def news_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     news = get_new_news(RSS_FEEDS, TELEGRAM_SOURCES, MAX_NEWS_PER_UPDATE)
     if news:
         messages = summarize_news_multi_persian(news, max_per_msg=10)
-        for msg in messages[:MAX_MESSAGES_PER_SEND]:
-            # Find first news item with image for this message chunk
-            img_url = _find_image_for_chunk(news, messages.index(msg), 10)
+        for i, msg in enumerate(messages[:MAX_MESSAGES_PER_SEND]):
+            img_url = _find_image_for_chunk(news, i * 10, 10)
             if img_url:
                 try:
                     await update.message.reply_photo(
                         photo=img_url,
-                        caption=msg[:1024],  # Telegram caption limit
+                        caption=msg[:1024],
                         parse_mode="Markdown",
                     )
                 except Exception:
-                    # Fallback to text if image fails
                     await update.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
             else:
                 await update.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)

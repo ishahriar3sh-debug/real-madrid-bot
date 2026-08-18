@@ -259,7 +259,7 @@ def get_player_news(feeds: list[dict], telegram_sources: list[dict], player_name
     
     all_news = fetch_all_news(feeds, telegram_sources)
     
-    # Get search terms for this player
+    # Lazy import to avoid circular dependency
     from players import get_player_search_terms
     search_terms = get_player_search_terms({"name": player_name})
     
