@@ -1,9 +1,10 @@
 """
-Real Madrid News Bot — Bot Handlers
-Sends news with images when available.
+Real Madrid News Bot - Bot Handlers
+Purple/dark theme, category-grouped news, improved Persian translation.
 """
 import logging
 import time
+from datetime import datetime, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import (
     Application,
@@ -14,17 +15,99 @@ from telegram.ext import (
 from config import (
     BOT_TOKEN, ADMIN_CHAT_ID, RSS_FEEDS, TELEGRAM_SOURCES,
     MAX_NEWS_PER_UPDATE, MAX_MESSAGES_PER_SEND,
-    WELCOME_MSG, STATUS_MSG, SOURCES_MSG,
+    WELCOME_MSG, STATUS_MSG, SOURCES_MSG, CATEGORY_LABELS,
 )
 from news_fetcher import get_new_news, get_player_news
-from players import get_players, format_players_list, find_player_by_number, get_player_search_terms
+from players import get_players, format_players_list, find_player_by_number
 from summarizer import summarize_news_multi_persian
 
 logger = logging.getLogger(__name__)
 
-# Debounce: prevent rapid-fire button presses
+# Debounce
 _last_news_time = {}
 DEBOUNCE_SECONDS = 10
+
+
+# ─── Helpers ────────────────────────────────────────────────────
+
+def _build_menu():
+    """Build the main inline keyboard (2 per row, emoji-only)."""
+    keyboard = [
+        [
+            InlineKeyboardButton("news", callback_data="get_news"),
+            InlineKeyboardButton("stats", callback_data="get_status"),
+        ],
+        [
+            InlineKeyboardButton("players", callback_data="get_players"),
+            InlineKeyboardButton("paper", callback_data="get_sources"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _build_back_menu():
+    """Back to main menu button."""
+    return InlineKeyboardMarkup([[InlineKeyboardButton("back", callback_data="back_to_menu")]])
+
+
+def _build_back_players():
+    """Back to players button."""
+    return InlineKeyboardMarkup([[InlineKeyboardButton("back", callback_data="get_players")]])
+
+
+def _find_image_for_chunk(news_items, start_idx, chunk_size):
+    """Find first image URL in a chunk."""
+    for item in news_items[start_idx:start_idx + chunk_size]:
+        img = item.get("image_url", "")
+        if img and img.startswith("http"):
+            return img
+    return ""
+
+
+def _group_by_category(news_items):
+    """Group news items by their category."""
+    groups = {}
+    for item in news_items:
+        cat = item.get("category", "general")
+        if cat not in groups:
+            groups[cat] = []
+        groups[cat].append(item)
+    return groups
+
+
+async def _send_news_messages(query_or_message, news, is_callback=False):
+    """Send news with category grouping and images."""
+    messages = summarize_news_multi_persian(news, max_per_msg=10)
+    if not messages:
+        return
+
+    for i, msg in enumerate(messages[:MAX_MESSAGES_PER_SEND]):
+        img_url = _find_image_for_chunk(news, i * 10, 10)
+        if img_url:
+            try:
+                if is_callback and i == 0:
+                    await query_or_message.edit_message_text(
+                        msg, parse_mode="Markdown", disable_web_page_preview=True
+                    )
+                    await query_or_message.message.reply_photo(
+                        photo=img_url, caption="image news"
+                    )
+                else:
+                    await query_or_message.reply_photo(
+                        photo=img_url, caption=msg[:1024], parse_mode="Markdown"
+                    )
+            except Exception:
+                await _safe_send_text(query_or_message, msg, is_callback, i)
+        else:
+            await _safe_send_text(query_or_message, msg, is_callback, i)
+
+
+async def _safe_send_text(target, msg, is_callback, idx):
+    """Send text message safely."""
+    if is_callback and idx == 0:
+        await target.edit_message_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
+    else:
+        await target.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
 
 
 # ─── Command Handlers ──────────────────────────────────────────
@@ -32,57 +115,29 @@ DEBOUNCE_SECONDS = 10
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command."""
     user = update.effective_user
-    keyboard = [
-        [
-            InlineKeyboardButton("📰 دریافت اخبار", callback_data="get_news"),
-            InlineKeyboardButton("📊 وضعیت", callback_data="get_status"),
-        ],
-        [InlineKeyboardButton("👥 بازیکنان", callback_data="get_players")],
-        [InlineKeyboardButton("ℹ️ منابع خبری", callback_data="get_sources")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
     await update.message.reply_text(
         WELCOME_MSG,
         parse_mode="Markdown",
-        reply_markup=reply_markup,
+        reply_markup=_build_menu(),
     )
     logger.info(f"User {user.id} ({user.first_name}) started the bot")
 
 
 async def news_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /news command — fetch, summarize, send with images."""
-    await update.message.reply_text("🔍 در حال دریافت اخبار از تمام منابع...")
-
+    """Handle /news command."""
+    await update.message.reply_text("search fetching news...")
     news = get_new_news(RSS_FEEDS, TELEGRAM_SOURCES, MAX_NEWS_PER_UPDATE)
     if news:
-        messages = summarize_news_multi_persian(news, max_per_msg=10)
-        for i, msg in enumerate(messages[:MAX_MESSAGES_PER_SEND]):
-            img_url = _find_image_for_chunk(news, i * 10, 10)
-            if img_url:
-                try:
-                    await update.message.reply_photo(
-                        photo=img_url,
-                        caption=msg[:1024],
-                        parse_mode="Markdown",
-                    )
-                except Exception:
-                    await update.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
-            else:
-                await update.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
+        await _send_news_messages(update.message, news)
     else:
-        await update.message.reply_text(
-            "📭 خبر جدیدی یافت نشد. دوباره بعداً بررسی کن.",
-            parse_mode="Markdown",
-        )
+        await update.message.reply_text("empty no new news found.")
 
 
 async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /status command."""
-    from datetime import datetime, timezone
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     await update.message.reply_text(
-        STATUS_MSG.format(last_check=now, news_count="—", interval="3"),
+        STATUS_MSG.format(last_check=now, news_count="N/A", interval="3"),
         parse_mode="Markdown",
     )
 
@@ -93,47 +148,33 @@ async def sources_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def players_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /players command — show all Real Madrid players."""
-    await update.message.reply_text("🔍 در حال دریافت لیست بازیکنان...")
-    
+    """Handle /players command."""
+    await update.message.reply_text("search fetching players...")
     players = get_players()
     if not players:
-        await update.message.reply_text("❌ خطا در دریافت لیست بازیکنان.")
+        await update.message.reply_text("error failed to fetch players.")
         return
-    
+
     text = format_players_list(players)
-    
-    # Create inline keyboard with player buttons
     keyboard = []
     row = []
-    for i, p in enumerate(players):
+    for p in players:
         num = p.get("number", "")
         name = p.get("name", "")
-        btn_text = f"{num}. {name}"
-        callback_data = f"player_{num}"
-        row.append(InlineKeyboardButton(btn_text, callback_data=callback_data))
-        
-        # 2 buttons per row
+        row.append(InlineKeyboardButton(f"{num}", callback_data=f"player_{num}"))
         if len(row) == 2:
             keyboard.append(row)
             row = []
-    
     if row:
         keyboard.append(row)
-    
-    # Add back button
-    keyboard.append([InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_to_menu")])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
+    keyboard.append([InlineKeyboardButton("back", callback_data="back_to_menu")])
+
     await update.message.reply_text(
-        text,
-        parse_mode="Markdown",
-        reply_markup=reply_markup,
+        text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 
-# ─── Callback Handlers (Inline Buttons) ────────────────────────
+# ─── Callback Handlers ──────────────────────────────────────────
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle inline button presses with debounce."""
@@ -142,54 +183,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     if query.data == "get_news":
-        # Debounce
         now = time.time()
         if user_id in _last_news_time and (now - _last_news_time[user_id]) < DEBOUNCE_SECONDS:
-            await query.answer("⏳ لطفاً چند لحظه صبر کنید...", show_alert=True)
+            await query.answer("wait please wait...", show_alert=True)
             return
         _last_news_time[user_id] = now
 
-        await query.edit_message_text("🔍 در حال دریافت اخبار از تمام منابع...")
+        await query.edit_message_text("search fetching news...")
         news = get_new_news(RSS_FEEDS, TELEGRAM_SOURCES, MAX_NEWS_PER_UPDATE)
         if news:
-            messages = summarize_news_multi_persian(news, max_per_msg=10)
-            # Edit first message (with image if available)
-            img_url = _find_image_for_chunk(news, 0, 10)
-            if img_url:
-                try:
-                    await query.edit_message_text(messages[0], parse_mode="Markdown", disable_web_page_preview=True)
-                    # Send photo separately
-                    await query.message.reply_photo(
-                        photo=img_url,
-                        caption="🖼️ تصویر خبر اول",
-                    )
-                except Exception:
-                    await query.edit_message_text(messages[0], parse_mode="Markdown", disable_web_page_preview=True)
-            else:
-                await query.edit_message_text(messages[0], parse_mode="Markdown", disable_web_page_preview=True)
-
-            # Send additional messages
-            for i, msg in enumerate(messages[1:MAX_MESSAGES_PER_SEND], 1):
-                img_url = _find_image_for_chunk(news, i * 10, 10)
-                if img_url:
-                    try:
-                        await query.message.reply_photo(
-                            photo=img_url,
-                            caption=msg[:1024],
-                            parse_mode="Markdown",
-                        )
-                    except Exception:
-                        await query.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
-                else:
-                    await query.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
+            await _send_news_messages(query, news, is_callback=True)
         else:
-            await query.edit_message_text("📭 خبر جدیدی یافت نشد.")
+            await query.edit_message_text("empty no new news found.")
 
     elif query.data == "get_status":
-        from datetime import datetime, timezone
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         await query.edit_message_text(
-            STATUS_MSG.format(last_check=now, news_count="—", interval="3"),
+            STATUS_MSG.format(last_check=now, news_count="N/A", interval="3"),
             parse_mode="Markdown",
         )
 
@@ -197,148 +207,107 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(SOURCES_MSG, parse_mode="Markdown")
 
     elif query.data == "back_to_menu":
-        # Show main menu
-        keyboard = [
-            [
-                InlineKeyboardButton("📰 دریافت اخبار", callback_data="get_news"),
-                InlineKeyboardButton("📊 وضعیت", callback_data="get_status"),
-            ],
-            [InlineKeyboardButton("👥 بازیکنان", callback_data="get_players")],
-            [InlineKeyboardButton("ℹ️ منابع خبری", callback_data="get_sources")],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            WELCOME_MSG,
-            parse_mode="Markdown",
-            reply_markup=reply_markup,
+            WELCOME_MSG, parse_mode="Markdown", reply_markup=_build_menu()
         )
 
     elif query.data == "get_players":
-        await query.edit_message_text("🔍 در حال دریافت لیست بازیکنان...")
-        
+        await query.edit_message_text("search fetching players...")
         players = get_players()
         if not players:
-            await query.edit_message_text("❌ خطا در دریافت لیست بازیکنان.")
+            await query.edit_message_text("error failed to fetch players.")
             return
-        
+
         text = format_players_list(players)
-        
         keyboard = []
         row = []
-        for i, p in enumerate(players):
+        for p in players:
             num = p.get("number", "")
-            name = p.get("name", "")
-            btn_text = f"{num}. {name}"
-            callback_data = f"player_{num}"
-            row.append(InlineKeyboardButton(btn_text, callback_data=callback_data))
-            
+            row.append(InlineKeyboardButton(f"{num}", callback_data=f"player_{num}"))
             if len(row) == 2:
                 keyboard.append(row)
                 row = []
-        
         if row:
             keyboard.append(row)
-        
-        keyboard.append([InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_to_menu")])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
+        keyboard.append([InlineKeyboardButton("back", callback_data="back_to_menu")])
+
         await query.edit_message_text(
-            text,
-            parse_mode="Markdown",
-            reply_markup=reply_markup,
+            text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
     elif query.data.startswith("player_"):
-        # Extract player number
         try:
-            num_str = query.data.split("_")[1]
-            player_num = int(num_str)
+            player_num = int(query.data.split("_")[1])
         except (IndexError, ValueError):
-            await query.answer("❌ بازیکن نامعتبر")
+            await query.answer("invalid player")
             return
-        
+
         players = get_players()
         player = find_player_by_number(players, player_num)
-        
         if not player:
-            await query.answer("❌ بازیکن پیدا نشد")
+            await query.answer("player not found")
             return
-        
+
         player_name = player.get("name", "")
-        
-        # Show loading
-        await query.edit_message_text(f"🔍 در حال جستجوی اخبار {player_name}...")
-        
-        # Get player news
-        player_news = get_player_news(RSS_FEEDS, TELEGRAM_SOURCES, player_name, max_items=10)
-        
+        await query.edit_message_text(f"search searching news for {player_name}...")
+
+        player_news = get_player_news(
+            RSS_FEEDS, TELEGRAM_SOURCES, player_name, max_items=10
+        )
         if not player_news:
-            # Back button
-            keyboard = [[InlineKeyboardButton("🔙 بازگشت به بازیکنان", callback_data="get_players")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
             await query.edit_message_text(
-                f"📭 خبری برای **{player_name}** یافت نشد.\n\n"
-                "امتحان کنید بعداً یا بازیکن دیگری انتخاب کنید.",
-                parse_mode="Markdown",
-                reply_markup=reply_markup,
+                f"empty no news for {player_name}.",
+                reply_markup=_build_back_players(),
             )
             return
-        
-        # Summarize player news
+
         messages = summarize_news_multi_persian(player_news, max_per_msg=10)
-        
-        # First message with back button
-        keyboard = [[InlineKeyboardButton("🔙 بازگشت به بازیکنان", callback_data="get_players")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        # Try to find image for first chunk
         img_url = _find_image_for_chunk(player_news, 0, 10)
-        
+
         if img_url:
             try:
-                await query.edit_message_text(messages[0], parse_mode="Markdown", disable_web_page_preview=True)
+                await query.edit_message_text(
+                    messages[0], parse_mode="Markdown", disable_web_page_preview=True
+                )
                 await query.message.reply_photo(
-                    photo=img_url,
-                    caption=f"🖼️ تصویر خبر {player_name}",
+                    photo=img_url, caption=f"image news {player_name}"
                 )
             except Exception:
-                await query.edit_message_text(messages[0], parse_mode="Markdown", disable_web_page_preview=True, reply_markup=reply_markup)
+                await query.edit_message_text(
+                    messages[0],
+                    parse_mode="Markdown",
+                    disable_web_page_preview=True,
+                    reply_markup=_build_back_players(),
+                )
         else:
-            await query.edit_message_text(messages[0], parse_mode="Markdown", disable_web_page_preview=True, reply_markup=reply_markup)
-        
-        # Send additional messages
+            await query.edit_message_text(
+                messages[0],
+                parse_mode="Markdown",
+                disable_web_page_preview=True,
+                reply_markup=_build_back_players(),
+            )
+
         for i, msg in enumerate(messages[1:3], 1):
             img_url = _find_image_for_chunk(player_news, i * 10, 10)
             if img_url:
                 try:
                     await query.message.reply_photo(
-                        photo=img_url,
-                        caption=msg[:1024],
-                        parse_mode="Markdown",
+                        photo=img_url, caption=msg[:1024], parse_mode="Markdown"
                     )
                 except Exception:
-                    await query.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
+                    await query.message.reply_text(
+                        msg, parse_mode="Markdown", disable_web_page_preview=True
+                    )
             else:
-                await query.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
-
-
-# ─── Helper Functions ──────────────────────────────────────────
-
-def _find_image_for_chunk(news_items: list[dict], start_idx: int, chunk_size: int) -> str:
-    """Find the first image URL in a chunk of news items."""
-    for item in news_items[start_idx:start_idx + chunk_size]:
-        img = item.get("image_url", "")
-        if img and img.startswith("http"):
-            return img
-    return ""
+                await query.message.reply_text(
+                    msg, parse_mode="Markdown", disable_web_page_preview=True
+                )
 
 
 # ─── Scheduled News Sender ─────────────────────────────────────
 
 async def send_scheduled_news(context: ContextTypes.DEFAULT_TYPE):
-    """Send summarized news to admin chat — called by JobQueue."""
+    """Send summarized news to admin chat via JobQueue."""
     admin_id = ADMIN_CHAT_ID
     news = get_new_news(RSS_FEEDS, TELEGRAM_SOURCES, MAX_NEWS_PER_UPDATE)
 
@@ -369,7 +338,7 @@ async def send_scheduled_news(context: ContextTypes.DEFAULT_TYPE):
                         parse_mode="Markdown",
                         disable_web_page_preview=True,
                     )
-            logger.info(f"Sent {len(news)} news items in {len(messages[:MAX_MESSAGES_PER_SEND])} messages to admin")
+            logger.info(f"Sent {len(news)} news items to admin")
         except Exception as e:
             logger.error(f"Failed to send news to admin: {e}")
     else:
@@ -380,7 +349,6 @@ async def send_scheduled_news(context: ContextTypes.DEFAULT_TYPE):
 
 def setup_bot() -> Application:
     """Setup and configure the bot."""
-    # Set bot commands (English) to fix ???? display issue in Telegram menu
     commands = [
         BotCommand("start", "Start the bot"),
         BotCommand("news", "Get latest Real Madrid news"),
@@ -390,13 +358,11 @@ def setup_bot() -> Application:
     ]
 
     async def _post_init(application: Application) -> None:
-        """Set bot commands and descriptions after initialization."""
         try:
             await application.bot.set_my_commands(commands)
             logger.info("Bot commands set successfully")
         except Exception as e:
             logger.warning(f"Failed to set bot commands: {e}")
-        # Set bot description and short description in English
         try:
             await application.bot.set_my_description(
                 "Real Madrid News Bot - Get the latest Real Madrid news in Persian"
@@ -410,17 +376,13 @@ def setup_bot() -> Application:
 
     app = Application.builder().token(BOT_TOKEN).post_init(_post_init).build()
 
-    # Command handlers
     app.add_handler(CommandHandler("start", start_handler))
     app.add_handler(CommandHandler("news", news_handler))
     app.add_handler(CommandHandler("status", status_handler))
     app.add_handler(CommandHandler("sources", sources_handler))
     app.add_handler(CommandHandler("players", players_handler))
-
-    # Inline button handler
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    # Scheduled job: every 3 hours
     app.job_queue.run_repeating(
         send_scheduled_news,
         interval=3 * 3600,
