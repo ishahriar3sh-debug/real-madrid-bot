@@ -153,7 +153,7 @@ def get_players(use_cache: bool = True, cache_hours: int = 24) -> List[Dict]:
     Caches result for cache_hours.
     """
     cache_file = os.path.join(os.path.dirname(__file__), "players_cache.json")
-    
+
     # Check cache
     if use_cache and os.path.exists(cache_file):
         try:
@@ -165,10 +165,10 @@ def get_players(use_cache: bool = True, cache_hours: int = 24) -> List[Dict]:
                 return cache["players"]
         except Exception:
             pass
-    
+
     # Try sources in order
     all_players = []
-    
+
     # 1. TheSportsDB (most reliable structured data)
     print("Fetching from TheSportsDB...")
     thesportsdb_players = fetch_from_thesportsdb()
@@ -182,7 +182,9 @@ def get_players(use_cache: bool = True, cache_hours: int = 24) -> List[Dict]:
             all_players.extend(thesportsdb_players)
         else:
             print(f"TheSportsDB data incomplete (only {found}/6 key players), using fallback")
-    
+    else:
+        print("TheSportsDB: no data returned")
+
     # 2. Official site (for validation/updates)
     if not all_players:
         print("Fetching from official site...")
@@ -196,16 +198,18 @@ def get_players(use_cache: bool = True, cache_hours: int = 24) -> List[Dict]:
                 all_players.extend(official_players)
             else:
                 print(f"Official site data incomplete (only {found}/6 key players)")
-    
+        else:
+            print("Official site: no data returned")
+
     # 3. Hardcoded fallback (always works)
     if not all_players:
         print("Using hardcoded fallback...")
         all_players = HARDCODED_PLAYERS.copy()
-    
+
     # Deduplicate and sort
     all_players = _deduplicate_players(all_players)
     all_players.sort(key=lambda x: x.get("number", 999))
-    
+
     # Cache result
     try:
         with open(cache_file, "w", encoding="utf-8") as f:
@@ -215,7 +219,7 @@ def get_players(use_cache: bool = True, cache_hours: int = 24) -> List[Dict]:
             }, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"Cache write failed: {e}")
-    
+
     print(f"Final squad: {len(all_players)} players")
     return all_players
 

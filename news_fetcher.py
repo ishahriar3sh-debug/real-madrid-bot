@@ -117,7 +117,10 @@ def parse_feed(xml_text: str) -> list[dict]:
 
 
 def fetch_telegram_channel(channel_url: str, timeout: int = 15) -> list[dict]:
-    """Fetch posts from a public Telegram channel via web preview."""
+    """Fetch posts from a public Telegram channel via web preview.
+
+    Uses multiple regex strategies to handle Telegram's HTML structure changes.
+    """
     req = Request(channel_url, headers={"User-Agent": USER_AGENT})
     try:
         with urlopen(req, timeout=timeout) as resp:
@@ -127,27 +130,43 @@ def fetch_telegram_channel(channel_url: str, timeout: int = 15) -> list[dict]:
         return []
 
     items = []
-    # Extract message blocks with text and optional images
+    # Strategy 1: Standard tgme_widget_message_wrap blocks
     message_blocks = re.findall(
         r'class="tgme_widget_message_wrap[^"]*"[^>]*>(.*?)</div>\s*</div>\s*</div>',
         html,
         re.DOTALL,
     )
 
+    # Strategy 2: Fallback - try broader pattern if first yields nothing
+    if not message_blocks:
+        message_blocks = re.findall(
+            r'class="tgme_widget_message[^"]*"[^>]*>(.*?)</div>\s*</div>\s*</div>\s*</div>\s*</div>',
+            html,
+            re.DOTALL,
+        )
+
     for block in message_blocks[:20]:
-        # Extract text
+        # Extract text - try multiple patterns
         text_match = re.search(
             r'class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>',
             block,
             re.DOTALL,
         )
         if not text_match:
+            # Try alternative text container
+            text_match = re.search(
+                r'class="message[^"]*"[^>]*>(.*?)</div>',
+                block,
+                re.DOTALL,
+            )
+        if not text_match:
             continue
+
         text = clean_html(text_match.group(1))
         if len(text) < 20:
             continue
 
-        # Extract image if present
+        # Extract image - try multiple patterns
         image_url = ""
         img_match = re.search(
             r'class="tgme_widget_message_photo_wrap"[^>]*style="background-image:url\(&#039;([^&]+)',
@@ -155,6 +174,14 @@ def fetch_telegram_channel(channel_url: str, timeout: int = 15) -> list[dict]:
         )
         if img_match:
             image_url = img_match.group(1)
+        else:
+            # Try alternative image pattern
+            img_match = re.search(
+                r'<img[^>]+src="([^"]+)"[^>]*>',
+                block,
+            )
+            if img_match:
+                image_url = img_match.group(1)
 
         title = text[:150].strip()
         if title:

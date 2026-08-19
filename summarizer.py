@@ -5,7 +5,9 @@ Creates cohesive Persian news summaries with auto language detection.
 import json
 import os
 import re
+import time
 import urllib.request
+import urllib.error
 from urllib.error import URLError
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -139,19 +141,19 @@ def _gemini_summarize(news_items: list[dict]) -> str:
 
 این اخبار رو بخون و یه پیام خبری منسجم و یکپارچه به فارسی بنویس.
 
-قوانین:
+ Rules:
 1. یه پیام واحد و منسجم بنویس (نه لیست جداگانه)
 2. اخبار مرتبط رو با هم ترکیب کن
 3. عنوان اصلی با ایموجی ⚪ بذار
 4. زیرش یه پاراگراف خلاصه بنویس که همه اخبار رو پوشش بده
-5. منابع رو انتهای پیام بنویس
+5. منابع رو انتها
 6. حداکثر ۳-۴ پاراگراف باشه
 7. جذاب و خوانا بنویس
 
-اخبار:
+inbox:
 {news_text}
 
-حالا یه پیام خبری منسجم فارسی بنویس:"""
+الان یه پیام خبری منسجم فارسی بنویس:"""
 
     payload = json.dumps({
         "contents": [{"parts": [{"text": prompt}]}],
@@ -167,17 +169,47 @@ def _gemini_summarize(news_items: list[dict]) -> str:
         headers={"Content-Type": "application/json"},
     )
 
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read())
-            text = data["candidates"][0]["content"]["parts"][0]["text"]
-            text = text.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-            return text
-    except (URLError, TimeoutError, KeyError, IndexError) as e:
-        print(f"[WARN] Gemini API failed: {e}, falling back to template")
-        return ""
+    # Retry with exponential backoff for transient errors
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read())
+                # Handle API error response
+                if "error" in data:
+                    err = data["error"]
+                    code = err.get("code", 0)
+                    msg = err.get("message", "Unknown error")
+                    if code == 429:  # Rate limit
+                        wait = 2 ** attempt
+                        print(f"[WARN] Gemini rate limited, retrying in {wait}s (attempt {attempt+1}/{max_retries})")
+                        time.sleep(wait)
+                        continue
+                    print(f"[WARN] Gemini API error ({code}): {msg}")
+                    return ""
+                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                text = text.strip()
+                if text.startswith("```"):
+                    text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+                return text
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                wait = 2 ** attempt
+                print(f"[WARN] Gemini rate limited (HTTP 429), retrying in {wait}s (attempt {attempt+1}/{max_retries})")
+                time.sleep(wait)
+                continue
+            print(f"[WARN] Gemini HTTP error {e.code}: {e.reason}")
+            return ""
+        except (URLError, TimeoutError, KeyError, IndexError) as e:
+            if attempt < max_retries - 1:
+                wait = 2 ** attempt
+                print(f"[WARN] Gemini request failed: {e}, retrying in {wait}s (attempt {attempt+1}/{max_retries})")
+                time.sleep(wait)
+                continue
+            print(f"[WARN] Gemini API failed after {max_retries} attempts: {e}, falling back to template")
+            return ""
+
+    return ""
 
 
 def _cohesive_persian_summary(news_items: list[dict]) -> str:

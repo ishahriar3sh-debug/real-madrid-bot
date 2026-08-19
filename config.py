@@ -4,8 +4,8 @@ Real Madrid News Bot — Configuration
 import os
 
 # Bot Settings
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8792366937:***")
-ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID", "580003433")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID", "")
 
 # RSS Feed Sources (filtered for Real Madrid)
 RSS_FEEDS = [
@@ -51,7 +51,7 @@ WELCOME_MSG = """⚽ **Real Madrid News Bot**
 به ربات اخبار رئال مادرید خوش اومدی!
 
 📋 دستورات:
-/start — شروع م{|*}جد
+/start — شروع مجد
 /news — دریافت آخرین اخبار
 /players — لیست بازیکنان
 /status — وضعیت ربات
